@@ -1,6 +1,6 @@
 # GHL API Proxy
 
-A generic CORS bypass proxy for GoHighLevel API calls. Fully dynamic - all credentials and endpoints passed per-request.
+A simple CORS bypass proxy for GoHighLevel API calls. Only the base URL is hardcoded - everything else is dynamic.
 
 ## Why This Exists
 
@@ -8,9 +8,11 @@ When your website is iframed inside GHL, browser CORS restrictions block direct 
 
 ## Usage
 
-### Option 1: Endpoint in URL Path
+Just append your GHL endpoint to the proxy URL:
+
 ```javascript
-fetch('https://ghl-proxy.locumtele.org/proxy/contacts/search', {
+// Search contacts
+fetch('https://ghl-proxy.locumtele.org/contacts/search', {
   method: 'POST',
   headers: {
     'Content-Type': 'application/json',
@@ -21,7 +23,7 @@ fetch('https://ghl-proxy.locumtele.org/proxy/contacts/search', {
 });
 
 // Get a specific contact
-fetch('https://ghl-proxy.locumtele.org/proxy/contacts/{{contact_id}}', {
+fetch('https://ghl-proxy.locumtele.org/contacts/{{contact_id}}', {
   headers: {
     'X-GHL-Token': '{{key}}',
     'X-GHL-Location-Id': '{{location_id}}'
@@ -29,40 +31,21 @@ fetch('https://ghl-proxy.locumtele.org/proxy/contacts/{{contact_id}}', {
 });
 
 // Get a specific user
-fetch('https://ghl-proxy.locumtele.org/proxy/users/{{user_id}}', {
+fetch('https://ghl-proxy.locumtele.org/users/{{user_id}}', {
   headers: {
-    'X-GHL-Token': '{{key}}',
-    'X-GHL-Location-Id': '{{location_id}}'
+    'X-GHL-Token': '{{key}}'
+  }
+});
+
+// Get opportunities
+fetch('https://ghl-proxy.locumtele.org/opportunities/{{opportunity_id}}', {
+  headers: {
+    'X-GHL-Token': '{{key}}'
   }
 });
 ```
 
-### Option 2: Endpoint in Header
-```javascript
-fetch('https://ghl-proxy.locumtele.org/proxy', {
-  method: 'POST',
-  headers: {
-    'Content-Type': 'application/json',
-    'X-GHL-Token': '{{key}}',
-    'X-GHL-Location-Id': '{{location_id}}',
-    'X-GHL-Endpoint': '/contacts/search'
-  },
-  body: JSON.stringify({ pageLimit: 20 })
-});
-```
-
-### Option 3: Full URL Override
-```javascript
-fetch('https://ghl-proxy.locumtele.org/proxy', {
-  method: 'POST',
-  headers: {
-    'Content-Type': 'application/json',
-    'X-GHL-Token': '{{key}}',
-    'X-GHL-URL': 'https://services.leadconnectorhq.com/contacts/search'
-  },
-  body: JSON.stringify({ locationId: '{{location_id}}', pageLimit: 20 })
-});
-```
+**Any GHL API endpoint works** - just replace the base URL.
 
 ## Headers Reference
 
@@ -70,17 +53,12 @@ fetch('https://ghl-proxy.locumtele.org/proxy', {
 |--------|----------|-------------|
 | `X-GHL-Token` | Yes | Your GHL API Bearer token |
 | `X-GHL-Location-Id` | No | Location ID (added to request headers) |
-| `X-GHL-Endpoint` | No* | GHL endpoint path (e.g., `/contacts/search`) |
-| `X-GHL-URL` | No* | Full URL override |
-
-*Either pass endpoint in URL path (`/proxy/contacts/search`) OR use `X-GHL-Endpoint` header OR use `X-GHL-URL` header.
 
 ## Endpoints
 
 ```
-GET /health                    # Health check
-ANY /proxy                     # Dynamic proxy (endpoint via header)
-ANY /proxy/{ghl-endpoint}      # Dynamic proxy (endpoint in path)
+GET  /health      # Health check
+ANY  /{endpoint}  # Forwards to https://services.leadconnectorhq.com/{endpoint}
 ```
 
 ## Deployment to Coolify

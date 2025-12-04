@@ -28,11 +28,9 @@ PUT  /contacts/{contact_id}    # Update contact
 
 ## Usage from Your Website
 
+### Option 1: Use Default Credentials (from environment variables)
 ```javascript
-// Instead of calling GHL directly (blocked by CORS):
-// fetch('https://services.leadconnectorhq.com/contacts/search', {...})
-
-// Call your proxy:
+// Proxy uses GHL_TOKEN and GHL_LOCATION_ID from server env vars
 const response = await fetch('https://ghl-proxy.locumtele.org/contacts/search', {
   method: 'POST',
   headers: { 'Content-Type': 'application/json' },
@@ -41,10 +39,25 @@ const response = await fetch('https://ghl-proxy.locumtele.org/contacts/search', 
     // locationId auto-added by proxy
   })
 });
-
-const data = await response.json();
-console.log(data.contacts);
 ```
+
+### Option 2: Pass Custom Credentials (per-request)
+```javascript
+// Override with your own token and location ID via headers
+const response = await fetch('https://ghl-proxy.locumtele.org/contacts/search', {
+  method: 'POST',
+  headers: {
+    'Content-Type': 'application/json',
+    'X-GHL-Token': 'pit-your-token-here',
+    'X-GHL-Location-Id': 'YourLocationId123'
+  },
+  body: JSON.stringify({
+    pageLimit: 20
+  })
+});
+```
+
+**Header priority:** Request headers (`X-GHL-Token`, `X-GHL-Location-Id`) override environment variables.
 
 ## Deployment to Coolify
 
@@ -117,6 +130,8 @@ docker run -p 5000:5000 \
 
 | Variable | Required | Description |
 |----------|----------|-------------|
-| `GHL_TOKEN` | Yes | GHL API Bearer token |
-| `GHL_LOCATION_ID` | Yes | GHL Sub-account/Location ID |
+| `GHL_TOKEN` | No* | Default GHL API Bearer token |
+| `GHL_LOCATION_ID` | No* | Default GHL Sub-account/Location ID |
 | `PORT` | No | Server port (default: 5000) |
+
+*Can be passed per-request via `X-GHL-Token` and `X-GHL-Location-Id` headers instead.

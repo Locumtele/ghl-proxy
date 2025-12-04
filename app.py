@@ -1,6 +1,10 @@
 """
 GHL API Proxy Server
 Bypasses CORS restrictions for GHL API calls from iframed websites.
+
+Credentials can be passed via:
+1. Request headers: X-GHL-Token, X-GHL-Location-Id (takes priority)
+2. Environment variables: GHL_TOKEN, GHL_LOCATION_ID (fallback)
 """
 
 import os
@@ -11,11 +15,21 @@ import requests
 app = Flask(__name__)
 CORS(app)  # Enable CORS for all routes
 
-# Configuration from environment variables
-GHL_TOKEN = os.environ.get('GHL_TOKEN', '')
-GHL_LOCATION_ID = os.environ.get('GHL_LOCATION_ID', '')
+# Default configuration from environment variables (fallback)
+DEFAULT_GHL_TOKEN = os.environ.get('GHL_TOKEN', '')
+DEFAULT_GHL_LOCATION_ID = os.environ.get('GHL_LOCATION_ID', '')
 GHL_BASE_URL = 'https://services.leadconnectorhq.com'
 GHL_API_VERSION = '2021-07-28'
+
+
+def get_credentials():
+    """
+    Get GHL credentials from request headers or fall back to environment variables.
+    Headers take priority: X-GHL-Token, X-GHL-Location-Id
+    """
+    token = request.headers.get('X-GHL-Token') or DEFAULT_GHL_TOKEN
+    location_id = request.headers.get('X-GHL-Location-Id') or DEFAULT_GHL_LOCATION_ID
+    return token, location_id
 
 
 @app.route('/health', methods=['GET'])
@@ -24,7 +38,8 @@ def health_check():
     return jsonify({
         'status': 'healthy',
         'service': 'ghl-proxy',
-        'location_id': GHL_LOCATION_ID[:8] + '...' if GHL_LOCATION_ID else 'not configured'
+        'default_location': DEFAULT_GHL_LOCATION_ID[:8] + '...' if DEFAULT_GHL_LOCATION_ID else 'not configured',
+        'accepts_custom_credentials': True
     })
 
 
@@ -36,21 +51,27 @@ def proxy(endpoint):
     Usage:
         GET  /proxy/contacts/search
         POST /proxy/contacts/search with JSON body
+
+    Optional headers:
+        X-GHL-Token: Your GHL API token (overrides default)
+        X-GHL-Location-Id: Your GHL location ID (overrides default)
     """
-    if not GHL_TOKEN:
-        return jsonify({'error': 'GHL_TOKEN not configured'}), 500
+    token, location_id = get_credentials()
+
+    if not token:
+        return jsonify({'error': 'GHL_TOKEN not configured. Pass X-GHL-Token header or set env var.'}), 500
 
     url = f"{GHL_BASE_URL}/{endpoint}"
 
     headers = {
-        'Authorization': f'Bearer {GHL_TOKEN}',
+        'Authorization': f'Bearer {token}',
         'Content-Type': 'application/json',
         'Version': GHL_API_VERSION
     }
 
-    # Add locationId header if configured
-    if GHL_LOCATION_ID:
-        headers['locationId'] = GHL_LOCATION_ID
+    # Add locationId header if available
+    if location_id:
+        headers['locationId'] = location_id
 
     try:
         # Forward the request to GHL API
@@ -86,22 +107,28 @@ def search_contacts():
     """
     Convenience endpoint for searching contacts.
     Automatically includes locationId in request body.
+
+    Optional headers:
+        X-GHL-Token: Your GHL API token (overrides default)
+        X-GHL-Location-Id: Your GHL location ID (overrides default)
     """
-    if not GHL_TOKEN:
-        return jsonify({'error': 'GHL_TOKEN not configured'}), 500
+    token, location_id = get_credentials()
+
+    if not token:
+        return jsonify({'error': 'GHL_TOKEN not configured. Pass X-GHL-Token header or set env var.'}), 500
 
     url = f"{GHL_BASE_URL}/contacts/search"
 
     headers = {
-        'Authorization': f'Bearer {GHL_TOKEN}',
+        'Authorization': f'Bearer {token}',
         'Content-Type': 'application/json',
         'Version': GHL_API_VERSION
     }
 
     # Get request body and ensure locationId is included
     body = request.json or {}
-    if 'locationId' not in body and GHL_LOCATION_ID:
-        body['locationId'] = GHL_LOCATION_ID
+    if 'locationId' not in body and location_id:
+        body['locationId'] = location_id
 
     try:
         response = requests.post(url, headers=headers, json=body)
@@ -121,17 +148,26 @@ def search_contacts():
 def contact_operations(contact_id):
     """
     Convenience endpoint for single contact operations.
+
+    Optional headers:
+        X-GHL-Token: Your GHL API token (overrides default)
+        X-GHL-Location-Id: Your GHL location ID (overrides default)
     """
-    if not GHL_TOKEN:
-        return jsonify({'error': 'GHL_TOKEN not configured'}), 500
+    token, location_id = get_credentials()
+
+    if not token:
+        return jsonify({'error': 'GHL_TOKEN not configured. Pass X-GHL-Token header or set env var.'}), 500
 
     url = f"{GHL_BASE_URL}/contacts/{contact_id}"
 
     headers = {
-        'Authorization': f'Bearer {GHL_TOKEN}',
+        'Authorization': f'Bearer {token}',
         'Content-Type': 'application/json',
         'Version': GHL_API_VERSION
     }
+
+    if location_id:
+        headers['locationId'] = location_id
 
     try:
         if request.method == 'GET':

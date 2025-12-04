@@ -1,10 +1,8 @@
 """
-GHL API Proxy Server
-Bypasses CORS restrictions for GHL API calls from iframed websites.
+Generic GHL API Proxy Server
+Bypasses CORS restrictions - fully dynamic endpoints and credentials.
 
-Credentials can be passed via:
-1. Request headers: X-GHL-Token, X-GHL-Location-Id (takes priority)
-2. Environment variables: GHL_TOKEN, GHL_LOCATION_ID (fallback)
+All values passed via request headers or body - nothing hardcoded.
 """
 
 import os
@@ -15,66 +13,74 @@ import requests
 app = Flask(__name__)
 CORS(app)  # Enable CORS for all routes
 
-# Default configuration from environment variables (fallback)
-DEFAULT_GHL_TOKEN = os.environ.get('GHL_TOKEN', '')
-DEFAULT_GHL_LOCATION_ID = os.environ.get('GHL_LOCATION_ID', '')
 GHL_BASE_URL = 'https://services.leadconnectorhq.com'
 GHL_API_VERSION = '2021-07-28'
 
 
-def get_credentials():
-    """
-    Get GHL credentials from request headers or fall back to environment variables.
-    Headers take priority: X-GHL-Token, X-GHL-Location-Id
-    """
-    token = request.headers.get('X-GHL-Token') or DEFAULT_GHL_TOKEN
-    location_id = request.headers.get('X-GHL-Location-Id') or DEFAULT_GHL_LOCATION_ID
-    return token, location_id
-
-
 @app.route('/health', methods=['GET'])
 def health_check():
-    """Health check endpoint for container orchestration."""
+    """Health check endpoint."""
     return jsonify({
         'status': 'healthy',
         'service': 'ghl-proxy',
-        'default_location': DEFAULT_GHL_LOCATION_ID[:8] + '...' if DEFAULT_GHL_LOCATION_ID else 'not configured',
-        'accepts_custom_credentials': True
+        'mode': 'dynamic'
     })
 
 
-@app.route('/proxy/<path:endpoint>', methods=['GET', 'POST', 'PUT', 'PATCH', 'DELETE'])
-def proxy(endpoint):
+@app.route('/proxy', methods=['GET', 'POST', 'PUT', 'PATCH', 'DELETE'])
+def proxy():
     """
-    Proxy requests to GHL API.
+    Generic proxy - all parameters passed dynamically.
 
-    Usage:
-        GET  /proxy/contacts/search
-        POST /proxy/contacts/search with JSON body
+    Required headers:
+        X-GHL-Token: Your GHL API token
+        X-GHL-Endpoint: The GHL endpoint path (e.g., /contacts/search, /contacts/{{contact_id}})
 
     Optional headers:
-        X-GHL-Token: Your GHL API token (overrides default)
-        X-GHL-Location-Id: Your GHL location ID (overrides default)
+        X-GHL-Location-Id: Location ID (added to request headers)
+        X-GHL-URL: Full URL override (ignores X-GHL-Endpoint, uses this instead)
+
+    Body: JSON payload to forward to GHL API
+
+    Examples:
+        X-GHL-Endpoint: /contacts/search
+        X-GHL-Endpoint: /contacts/abc123
+        X-GHL-Endpoint: /users/xyz789
+        X-GHL-URL: https://services.leadconnectorhq.com/contacts/search
     """
-    token, location_id = get_credentials()
+    # Get credentials and endpoint from headers
+    token = request.headers.get('X-GHL-Token')
+    endpoint = request.headers.get('X-GHL-Endpoint')
+    location_id = request.headers.get('X-GHL-Location-Id')
+    full_url = request.headers.get('X-GHL-URL')
 
     if not token:
-        return jsonify({'error': 'GHL_TOKEN not configured. Pass X-GHL-Token header or set env var.'}), 500
+        return jsonify({'error': 'Missing X-GHL-Token header'}), 400
 
-    url = f"{GHL_BASE_URL}/{endpoint}"
+    if not endpoint and not full_url:
+        return jsonify({'error': 'Missing X-GHL-Endpoint or X-GHL-URL header'}), 400
 
+    # Build target URL
+    if full_url:
+        url = full_url
+    else:
+        # Ensure endpoint starts with /
+        if not endpoint.startswith('/'):
+            endpoint = '/' + endpoint
+        url = f"{GHL_BASE_URL}{endpoint}"
+
+    # Build headers for GHL API
     headers = {
         'Authorization': f'Bearer {token}',
         'Content-Type': 'application/json',
         'Version': GHL_API_VERSION
     }
 
-    # Add locationId header if available
     if location_id:
         headers['locationId'] = location_id
 
     try:
-        # Forward the request to GHL API
+        # Forward the request
         if request.method == 'GET':
             response = requests.get(url, headers=headers, params=request.args)
         elif request.method == 'POST':
@@ -88,7 +94,6 @@ def proxy(endpoint):
         else:
             return jsonify({'error': 'Method not allowed'}), 405
 
-        # Return the response from GHL API
         return Response(
             response.content,
             status=response.status_code,
@@ -102,63 +107,29 @@ def proxy(endpoint):
         }), 502
 
 
-@app.route('/contacts/search', methods=['POST'])
-def search_contacts():
+@app.route('/proxy/<path:endpoint>', methods=['GET', 'POST', 'PUT', 'PATCH', 'DELETE'])
+def proxy_path(endpoint):
     """
-    Convenience endpoint for searching contacts.
-    Automatically includes locationId in request body.
+    Alternative: Pass endpoint as URL path instead of header.
+
+    Required headers:
+        X-GHL-Token: Your GHL API token
 
     Optional headers:
-        X-GHL-Token: Your GHL API token (overrides default)
-        X-GHL-Location-Id: Your GHL location ID (overrides default)
+        X-GHL-Location-Id: Location ID
+
+    Examples:
+        POST /proxy/contacts/search
+        GET  /proxy/contacts/abc123
+        GET  /proxy/users/xyz789
     """
-    token, location_id = get_credentials()
+    token = request.headers.get('X-GHL-Token')
+    location_id = request.headers.get('X-GHL-Location-Id')
 
     if not token:
-        return jsonify({'error': 'GHL_TOKEN not configured. Pass X-GHL-Token header or set env var.'}), 500
+        return jsonify({'error': 'Missing X-GHL-Token header'}), 400
 
-    url = f"{GHL_BASE_URL}/contacts/search"
-
-    headers = {
-        'Authorization': f'Bearer {token}',
-        'Content-Type': 'application/json',
-        'Version': GHL_API_VERSION
-    }
-
-    # Get request body and ensure locationId is included
-    body = request.json or {}
-    if 'locationId' not in body and location_id:
-        body['locationId'] = location_id
-
-    try:
-        response = requests.post(url, headers=headers, json=body)
-        return Response(
-            response.content,
-            status=response.status_code,
-            content_type='application/json'
-        )
-    except requests.exceptions.RequestException as e:
-        return jsonify({
-            'error': 'Failed to reach GHL API',
-            'details': str(e)
-        }), 502
-
-
-@app.route('/contacts/<contact_id>', methods=['GET', 'PUT', 'DELETE'])
-def contact_operations(contact_id):
-    """
-    Convenience endpoint for single contact operations.
-
-    Optional headers:
-        X-GHL-Token: Your GHL API token (overrides default)
-        X-GHL-Location-Id: Your GHL location ID (overrides default)
-    """
-    token, location_id = get_credentials()
-
-    if not token:
-        return jsonify({'error': 'GHL_TOKEN not configured. Pass X-GHL-Token header or set env var.'}), 500
-
-    url = f"{GHL_BASE_URL}/contacts/{contact_id}"
+    url = f"{GHL_BASE_URL}/{endpoint}"
 
     headers = {
         'Authorization': f'Bearer {token}',
@@ -171,17 +142,24 @@ def contact_operations(contact_id):
 
     try:
         if request.method == 'GET':
-            response = requests.get(url, headers=headers)
+            response = requests.get(url, headers=headers, params=request.args)
+        elif request.method == 'POST':
+            response = requests.post(url, headers=headers, json=request.json)
         elif request.method == 'PUT':
             response = requests.put(url, headers=headers, json=request.json)
+        elif request.method == 'PATCH':
+            response = requests.patch(url, headers=headers, json=request.json)
         elif request.method == 'DELETE':
             response = requests.delete(url, headers=headers)
+        else:
+            return jsonify({'error': 'Method not allowed'}), 405
 
         return Response(
             response.content,
             status=response.status_code,
-            content_type='application/json'
+            content_type=response.headers.get('Content-Type', 'application/json')
         )
+
     except requests.exceptions.RequestException as e:
         return jsonify({
             'error': 'Failed to reach GHL API',
